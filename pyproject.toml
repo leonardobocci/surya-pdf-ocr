@@ -1,0 +1,21 @@
+[project]
+name = "ocr"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pdf2image>=1.17.0",
+    "polars>=1.17.1",
+    "streamlit>=1.41.0",
+    "surya-ocr>=0.8.0",
+    "whenever>=0.6.15",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "pre-commit>=4.0.1",
+    "ruff>=0.8.3",
+    "wat-inspector>=0.4.3",
+]
