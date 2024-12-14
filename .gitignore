@@ -169,4 +169,4 @@ cython_debug/
 
 order_docs*
 example_output*
-explore_backup*
+*backup*
