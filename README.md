@@ -10,3 +10,5 @@ I took this as a chance to play around with Surya (a pretrained deep learning mo
 It does an incredible job at parsing the PDFs in question, with human-level accuracy of parsing.
 
 Some further text processing is done to then bring Surya's outputs into the exact format required by the system.
+
+Since Surya requires a GPU to perform OCR at rapid speeds, this project is used via Colab, which provides free GPU runtimes.
