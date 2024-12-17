@@ -13,6 +13,14 @@ from surya.model.recognition.processor import load_processor as load_rec_process
 
 LOCAL = True  # this is used in Colab if set to false
 
+#modify this search template as needed
+location_pattern = ["ufficio a", "ufficio b", "sala riunioni"]
+name_abbreviations = {
+    "ufficio a": "-UFF.A",
+    "ufficio b": "-UFF.B",
+    "sala riunioni": "-S.RIU",
+}
+
 # set up Surya
 langs = ["it"]
 det_processor, det_model = load_det_processor(), load_det_model()
@@ -83,7 +91,7 @@ def ocr_all_pages(images: list) -> list[dict]:
     return all_pages
 
 
-def extract_order_rif(order_ocr: list) -> int:
+def extract_order_rif(order_ocr:list) -> int:
     """Extract order detail: riferimento, based on last page entry in pdf."""
     for line in order_ocr:
         if "rif" in str.lower(line["text"]):
@@ -96,6 +104,13 @@ def extract_order_rif(order_ocr: list) -> int:
                 except ValueError:
                     continue
 
+#def extract_order_optional_location(line) -> str:
+#    """Extract order detail: location, which may or may not be provided."""
+#    for line in order_ocr:
+#        for pattern in location_pattern:
+#            if pattern in str.lower(line["text"]).replace('"', ''):
+#                return name_abbreviations[pattern]
+#    return ""
 
 def extract_ordered_items(order_ocr: list) -> list[dict]:
     """Extract order codes."""
@@ -141,7 +156,7 @@ def extract_ordered_items(order_ocr: list) -> list[dict]:
     return order_details
 
 
-def format_output(orders: list) -> None:
+def format_output(orders: list, filename:str) -> None:
     order_output = []
     for order in orders:
         for order_detail in order["details"]:
@@ -149,18 +164,18 @@ def format_output(orders: list) -> None:
                 {
                     "Article No.": order_detail["item_code"],
                     "Quantity": order_detail["ordered_qty"],
-                    "rif": f'{order["order_number"]}/{order["order_rif"]}',
+                    "rif": f'{order["order_number"]}/{order["order_rif"]}{order["location"]}',
                 }
             )
-    pl.DataFrame(order_output).write_excel("FRONT.xlsx")
+    pl.DataFrame(order_output).write_excel(f"{filename}.xlsx")
     if not LOCAL:
-        files.download("FRONT.xlsx")  # noqa:F821
+        files.download(f"{filename}.xlsx")  # noqa:F821
 
 
 # file preprocessing
 filenames = get_filepaths()
-orders = []
 for filename in filenames:
+    orders = []
     ordernum, orderdate, newfilename = format_filename(filename)
     orders.append(
         {
@@ -170,11 +185,12 @@ for filename in filenames:
         }
     )
 
-# orders dict is now ready for OCR
-for order in orders:
-    order_ocr = ocr_all_pages(order["images"])
-    order["order_rif"] = extract_order_rif(order_ocr)
-    order["details"] = extract_ordered_items(order_ocr)
+    # orders dict is now ready for OCR
+    for order in orders:
+        order_ocr = ocr_all_pages(order["images"])
+        order["order_rif"] = extract_order_rif(order_ocr)
+        order["location"] = extract_order_optional_location(order_ocr)
+        order["details"] = extract_ordered_items(order_ocr)
 
-# now format output and download file
-format_output(orders)
+    # now format output and download file
+    format_output(orders, newfilename)
