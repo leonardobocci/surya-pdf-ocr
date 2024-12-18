@@ -11,15 +11,17 @@ from surya.model.detection.model import (
 from surya.model.recognition.model import load_model as load_rec_model
 from surya.model.recognition.processor import load_processor as load_rec_processor
 
-LOCAL = True  # this is used in Colab if set to false
-
 #modify this search template as needed
-location_pattern = ["ufficio a", "ufficio b", "sala riunioni"]
 name_abbreviations = {
     "ufficio a": "-UFF.A",
     "ufficio b": "-UFF.B",
-    "sala riunioni": "-S.RIU",
+    'ufficio c/d': "-UFF.C/D",
+    "sala riunioni h": "-S.R.H",
 }
+
+LOCAL = False  # this is used in Colab if set to false
+
+location_pattern = list(name_abbreviations.keys())
 
 # set up Surya
 langs = ["it"]
@@ -104,18 +106,19 @@ def extract_order_rif(order_ocr:list) -> int:
                 except ValueError:
                     continue
 
-#def extract_order_optional_location(line) -> str:
-#    """Extract order detail: location, which may or may not be provided."""
-#    for line in order_ocr:
-#        for pattern in location_pattern:
-#            if pattern in str.lower(line["text"]).replace('"', ''):
-#                return name_abbreviations[pattern]
-#    return ""
+def extract_order_optional_location(order_ocr) -> list:
+    """Extract order detail: location, which may or may not be provided."""
+    locations = []
+    for i, line in enumerate(order_ocr):
+        for pattern in location_pattern:
+            if pattern in str.lower(line["text"]).replace('"', ''):
+                locations.append({'location':name_abbreviations[pattern], 'index':i})
+    return locations
 
 def extract_ordered_items(order_ocr: list) -> list[dict]:
     """Extract order codes."""
     order_details = []
-    for line in order_ocr:
+    for i, line in enumerate(order_ocr):
         split_text = line["text"].replace(" ", ".").split(".")
         item_code_chars = [
             entry for entry in split_text if any(chr.isdigit() for chr in entry)
@@ -127,6 +130,7 @@ def extract_ordered_items(order_ocr: list) -> list[dict]:
                 {
                     "item_code": str.strip(item_code),
                     "coordinates": line["bbox"],
+                    "line_index": i,
                     "page": line["page"],
                 }
             )
@@ -156,15 +160,19 @@ def extract_ordered_items(order_ocr: list) -> list[dict]:
     return order_details
 
 
-def format_output(orders: list, filename:str) -> None:
+def format_output(orders: list, filename:str, locations:list) -> None:
     order_output = []
     for order in orders:
         for order_detail in order["details"]:
+            saved_location = ""
+            for location in locations:
+                if location['index'] < order_detail['line_index']:
+                    saved_location = location['location']
             order_output.append(
                 {
                     "Article No.": order_detail["item_code"],
                     "Quantity": order_detail["ordered_qty"],
-                    "rif": f'{order["order_number"]}/{order["order_rif"]}{order["location"]}',
+                    "rif": f'{order["order_number"]}/{order["order_rif"]}{saved_location}',
                 }
             )
     pl.DataFrame(order_output).write_excel(f"{filename}.xlsx")
@@ -189,8 +197,8 @@ for filename in filenames:
     for order in orders:
         order_ocr = ocr_all_pages(order["images"])
         order["order_rif"] = extract_order_rif(order_ocr)
-        order["location"] = extract_order_optional_location(order_ocr)
+        locations = extract_order_optional_location(order_ocr)
         order["details"] = extract_ordered_items(order_ocr)
 
     # now format output and download file
-    format_output(orders, newfilename)
+    format_output(orders, newfilename, locations)
