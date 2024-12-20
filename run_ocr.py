@@ -11,12 +11,17 @@ from surya.model.detection.model import (
 from surya.model.recognition.model import load_model as load_rec_model
 from surya.model.recognition.processor import load_processor as load_rec_processor
 
-#modify this search template as needed
+#modify this search template as needed:
+#in the first text part enclosed by double quotes, only put lowercase characters, without double quotes
+#eg. invalid entries: UFFICIO A, ufficio "A". Valid entry: ufficio a
+#in the second text part after the colon, put the desired abbreviation to be received in the excel output
+#remember to start the desired output with - character
 name_abbreviations = {
     "ufficio a": "-UFF.A",
     "ufficio b": "-UFF.B",
     'ufficio c/d': "-UFF.C/D",
     "sala riunioni h": "-S.R.H",
+    #"example to search for": "-example output",
 }
 
 LOCAL = False  # this is used in Colab if set to false
@@ -93,7 +98,7 @@ def ocr_all_pages(images: list) -> list[dict]:
     return all_pages
 
 
-def extract_order_rif(order_ocr:list) -> int:
+def extract_order_rif(order_ocr: list) -> int:
     """Extract order detail: riferimento, based on last page entry in pdf."""
     for line in order_ocr:
         if "rif" in str.lower(line["text"]):
@@ -106,14 +111,16 @@ def extract_order_rif(order_ocr:list) -> int:
                 except ValueError:
                     continue
 
+
 def extract_order_optional_location(order_ocr) -> list:
     """Extract order detail: location, which may or may not be provided."""
     locations = []
     for i, line in enumerate(order_ocr):
         for pattern in location_pattern:
-            if pattern in str.lower(line["text"]).replace('"', ''):
-                locations.append({'location':name_abbreviations[pattern], 'index':i})
+            if pattern in str.lower(line["text"]).replace('"', ""):
+                locations.append({"location": name_abbreviations[pattern], "index": i})
     return locations
+
 
 def extract_ordered_items(order_ocr: list) -> list[dict]:
     """Extract order codes."""
@@ -124,14 +131,26 @@ def extract_ordered_items(order_ocr: list) -> list[dict]:
             entry for entry in split_text if any(chr.isdigit() for chr in entry)
         ][0:3]
         item_code = str.strip("".join(item_code_chars))
-        exclude_patterns = ["/", ",", "-", "MM"]
-        if len(item_code) == 9 and not any(x in item_code for x in exclude_patterns):
+        exclude_patterns = [
+            "/",
+            ",",
+            "-",
+            "MM",
+        ]  # order codes should not contain these, helps in getting rid of other similarly sized text
+        # find numbers that are dates and skip them
+        if len(item_code) == 8 and LocalDateTime.strptime(item_code, "%d%m%Y").date():
+            continue
+        if 8 <= len(item_code) <= 10 and not any(
+            x in item_code for x in exclude_patterns
+        ):
+            digit_warning = None if len(item_code) == 9 else "Digit count warning"
             order_details.append(
                 {
                     "item_code": str.strip(item_code),
                     "coordinates": line["bbox"],
                     "line_index": i,
                     "page": line["page"],
+                    "digit_warning": digit_warning,
                 }
             )
 
@@ -148,31 +167,36 @@ def extract_ordered_items(order_ocr: list) -> list[dict]:
                 and line["page"] == order["page"]
             ):
                 matched_text.append((line["text"]))
-        ordered_qty = int(
-            [
-                str.strip(char)
-                for char in matched_text
-                if "," in char and len(str.strip(char)) == 5
-            ][0][0]
-        )
+        try:
+            ordered_qty = int(
+                [
+                    str.strip(char)
+                    for char in matched_text
+                    if "," in char and 5 <= len(str.strip(char)) <= 7
+                ][0].split(",")[0]
+            )
+        except IndexError:
+            print(f'No quantity found for item code:{order["item_code"]}')
+            ordered_qty = None
         order["ordered_qty"] = ordered_qty
 
     return order_details
 
 
-def format_output(orders: list, filename:str, locations:list) -> None:
+def format_output(orders: list, filename: str, locations: list) -> None:
     order_output = []
     for order in orders:
         for order_detail in order["details"]:
             saved_location = ""
             for location in locations:
-                if location['index'] < order_detail['line_index']:
-                    saved_location = location['location']
+                if location["index"] < order_detail["line_index"]:
+                    saved_location = location["location"]
             order_output.append(
                 {
                     "Article No.": order_detail["item_code"],
                     "Quantity": order_detail["ordered_qty"],
                     "rif": f'{order["order_number"]}/{order["order_rif"]}{saved_location}',
+                    "digit_warning": order_detail["digit_warning"],
                 }
             )
     pl.DataFrame(order_output).write_excel(f"{filename}.xlsx")
